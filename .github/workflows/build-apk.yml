@@ -1,81 +1,74 @@
-name: Build GSR APK
+steps:
+  - name: Checkout
+    uses: actions/checkout@v7
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+  - name: Setup Java 17
+    uses: actions/setup-java@v6
+    with:
+      distribution: temurin
+      java-version: '17'
 
-permissions:
-  contents: read
+  - name: Setup Android SDK
+    uses: android-actions/setup-android@v4
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  - name: Find and extract GSR Android ZIP
+    shell: bash
+    run: |
+      set -e
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -iname '*.zip' -print -quit)"
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
+      if [ -z "$ZIP_FILE" ]; then
+        echo "ERROR: No ZIP file found in repository root."
+        ls -la
+        exit 1
+      fi
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+      echo "Using ZIP: $ZIP_FILE"
 
-      - name: Extract GSR Android project
-        shell: bash
-        run: |
-          set -e
+      rm -rf "$GITHUB_WORKSPACE/gsr-project"
+      mkdir -p "$GITHUB_WORKSPACE/gsr-project"
+      unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/gsr-project"
 
-          rm -rf gsr-project
-          mkdir -p gsr-project
+      PROJECT_DIR="$(find "$GITHUB_WORKSPACE/gsr-project" -type f \-name settings.gradle -o -name settings.gradle.kts \ -print -quit | xargs -r dirname)"
 
-          unzip -q GSR_Native_Android_Studio_Project.zip -d gsr-project
+      if [ -z "$PROJECT_DIR" ]; then
+        echo "ERROR: Android project settings.gradle/settings.gradle.kts not found."
+        echo "ZIP contents:"
+        find "$GITHUB_WORKSPACE/gsr-project" -maxdepth 4 -type f | head -100
+        exit 1
+      fi
 
-          PROJECT_DIR="$(dirname "$(find "$PWD/gsr-project" -name settings.gradle -type f -print -quit)")"
+      echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      echo "Android project: $PROJECT_DIR"
 
-          if [ -z "$PROJECT_DIR" ] || [ "$PROJECT_DIR" = "." ]; then
-            echo "ERROR: settings.gradle was not found inside the ZIP."
-            exit 1
-          fi
+  - name: Setup Gradle
+    uses: gradle/actions/setup-gradle@v6
+    with:
+      gradle-version: '8.10.2'
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found at: $PROJECT_DIR"
+  - name: Build Debug APK
+    working-directory: ${{ env.PROJECT_DIR }}
+    run: gradle --no-daemon clean assembleDebug --stacktrace
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.10.2'
+  - name: Find APK
+    shell: bash
+    run: |
+      set -e
+      APK="$(find "${{ env.PROJECT_DIR }}/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
 
-      - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          gradle --no-daemon clean assembleDebug --stacktrace
+      if [ -z "$APK" ]; then
+        echo "ERROR: APK was not generated."
+        exit 1
+      fi
 
-      - name: Find APK
-        shell: bash
-        run: |
-          set -e
+      echo "APK found: $APK"
+      cp "$APK" "$GITHUB_WORKSPACE/GSR.apk"
 
-          APK="$(find "${{ env.PROJECT_DIR }}/app/build/outputs/apk" \
-            -type f -name '*.apk' -print -quit)"
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          cp "$APK" "$GITHUB_WORKSPACE/GSR.apk"
-
-      - name: Upload GSR APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: GSR-Android-APK
-          path: GSR.apk
-          if-no-files-found: error
-          retention-days: 14
+  - name: Upload GSR APK
+    uses: actions/upload-artifact@v7
+    with:
+      name: GSR-Android-APK
+      path: GSR.apk
+      if-no-files-found: error
+      retention-days: 14
