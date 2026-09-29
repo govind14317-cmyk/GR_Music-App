@@ -1,0 +1,43 @@
+name: Build GSR APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract GSR project
+        run: unzip -o GSR_Native_Android_Studio_Project.zip
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build APK
+        working-directory: GSR_Native_Android
+        run: |
+          chmod +x gradlew || true
+          if [ -f gradlew ]; then
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
+
+      - name: Upload GSR APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSR-APK
+          path: GSR_Native_Android/app/build/outputs/apk/debug/*.apk
